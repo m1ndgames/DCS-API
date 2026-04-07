@@ -267,7 +267,7 @@ fn set_positions_by_name(_lua: &Lua, obj_positions: LuaTable) -> LuaResult<()> {
 }
 
 /// Called by dcsapi.lua each frame to fetch and return any pending server commands.
-/// Returns a Lua array of tables: { action, player_id, reason }.
+/// Returns a Lua array of tables with all command fields (action, player_id, reason, message, duration, path).
 /// API failures return an empty table — a down API must never crash DCS.
 fn poll_commands(lua: &Lua, _: ()) -> LuaResult<LuaTable> {
     let (client, base, key) = make_client_with_key();
@@ -298,6 +298,15 @@ fn poll_commands(lua: &Lua, _: ()) -> LuaResult<LuaTable> {
         }
         if let Some(v) = cmd.get("reason").and_then(|v| v.as_str()) {
             t.set("reason", v.to_string())?;
+        }
+        if let Some(v) = cmd.get("message").and_then(|v| v.as_str()) {
+            t.set("message", v.to_string())?;
+        }
+        if let Some(v) = cmd.get("duration").and_then(|v| v.as_i64()) {
+            t.set("duration", v as i32)?;
+        }
+        if let Some(v) = cmd.get("path").and_then(|v| v.as_str()) {
+            t.set("path", v.to_string())?;
         }
         result.set(i + 1, t)?;
     }
