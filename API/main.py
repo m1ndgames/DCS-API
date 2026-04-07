@@ -1,3 +1,4 @@
+from collections import deque
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Security
@@ -140,6 +141,31 @@ class GameState(BaseModel):
 state: GameState | None = None
 
 
+# --- Command queue (populated by action endpoints, drained by /commands) ---
+
+_commands: deque = deque()
+
+
+# --- Request bodies for action endpoints ---
+
+class KickRequest(BaseModel):
+    reason: str = "Kicked by admin"
+
+class BanRequest(BaseModel):
+    reason: str = "Banned by admin"
+    duration: int = Field(0, ge=0, description="Ban duration in seconds; 0 = permanent")
+
+class MessageRequest(BaseModel):
+    message: str
+
+class BroadcastRequest(BaseModel):
+    message: str
+    duration: int = Field(10, ge=1, description="Seconds to display the text overlay")
+
+class LoadMissionRequest(BaseModel):
+    path: str = Field(..., description="Full path to the .miz file on the server")
+
+
 # --- Ingest (called by DCS module — also requires key when auth is enabled) ---
 
 @app.post("/ingest", include_in_schema=False, dependencies=[Depends(_require_auth)])
@@ -147,6 +173,15 @@ def ingest(game_state: GameState):
     global state
     state = game_state
     return {"ok": True}
+
+
+# --- Commands (called by DCS module each frame to drain the queue) ---
+
+@app.get("/commands", include_in_schema=False, dependencies=[Depends(_require_auth)])
+def commands():
+    result = list(_commands)
+    _commands.clear()
+    return result
 
 
 # --- Health (always public) ---
@@ -182,6 +217,66 @@ def player(name: str):
     if not state:
         return None
     return next((p for p in state.players if p.name == name), None)
+
+
+def _get_player_or_error(name: str) -> Player:
+    if not state:
+        raise HTTPException(status_code=503, detail="No active mission")
+    p = next((p for p in state.players if p.name == name), None)
+    if not p:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return p
+
+
+@router.post("/players/{name}/kick", status_code=200)
+def kick_player(name: str, body: KickRequest = KickRequest()):
+    p = _get_player_or_error(name)
+    _commands.append({"action": "kick", "player_id": p.player_id, "reason": body.reason})
+    return {"queued": True}
+
+
+@router.post("/players/{name}/ban", status_code=200)
+def ban_player(name: str, body: BanRequest = BanRequest()):
+    p = _get_player_or_error(name)
+    _commands.append({"action": "ban", "player_id": p.player_id, "reason": body.reason, "duration": body.duration})
+    return {"queued": True}
+
+
+@router.post("/players/{name}/message", status_code=200)
+def message_player(name: str, body: MessageRequest):
+    p = _get_player_or_error(name)
+    _commands.append({"action": "message", "player_id": p.player_id, "message": body.message})
+    return {"queued": True}
+
+
+@router.post("/server/chat", status_code=200)
+def server_chat(body: MessageRequest):
+    if not state:
+        raise HTTPException(status_code=503, detail="No active mission")
+    _commands.append({"action": "chat", "message": body.message})
+    return {"queued": True}
+
+
+@router.post("/server/broadcast", status_code=200)
+def server_broadcast(body: BroadcastRequest):
+    if not state:
+        raise HTTPException(status_code=503, detail="No active mission")
+    _commands.append({"action": "broadcast", "message": body.message, "duration": body.duration})
+    return {"queued": True}
+
+
+@router.post("/server/mission/restart", status_code=200)
+def mission_restart():
+    if not state:
+        raise HTTPException(status_code=503, detail="No active mission")
+    _commands.append({"action": "load_next_mission"})
+    return {"queued": True}
+
+
+@router.post("/server/mission/load", status_code=200)
+def mission_load(body: LoadMissionRequest):
+    _commands.append({"action": "load_mission", "path": body.path})
+    return {"queued": True}
 
 
 @router.get("/units")
