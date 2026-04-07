@@ -1,0 +1,9 @@
+services:
+  api:
+    image: ghcr.io/m1ndgames/dcs-api:latest
+    ports:
+      - "4414:4414"
+    environment:
+      DCSAPI_HOST: 0.0.0.0
+      DCSAPI_PORT: 4414
+    restart: unless-stopped

@@ -1,0 +1,6 @@
+[env]
+LUA_LIB_NAME = "lua"
+# lua.lib is a pre-generated import library pointing to DCS's lua.dll.
+# The path is relative to this config file (Module/.cargo/config.toml),
+# so it resolves to Module/lua_lib/.
+LUA_LIB = { value = "lua_lib", relative = true }

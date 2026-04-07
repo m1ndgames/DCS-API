@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Rust
+/Module/target/
+Cargo.lock
+
+# JetBrains IDEs
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+.claude/
+CLAUDE.md
