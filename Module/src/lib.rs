@@ -4,8 +4,8 @@ use std::sync::{LazyLock, Mutex};
 
 // --- Config (set once by dcsapi.init(), defaults match dcsapi.cfg) ---
 
-static API_URL: LazyLock<Mutex<String>> = LazyLock::new(|| {
-    Mutex::new("http://127.0.0.1:4414/ingest".to_string())
+static BASE_URL: LazyLock<Mutex<String>> = LazyLock::new(|| {
+    Mutex::new("http://127.0.0.1:4414".to_string())
 });
 
 static API_KEY: LazyLock<Mutex<String>> = LazyLock::new(|| {
@@ -101,13 +101,19 @@ struct GameState {
 
 static STATE: LazyLock<Mutex<GameState>> = LazyLock::new(|| Mutex::new(GameState::default()));
 
+// --- HTTP helpers ---
+
+fn make_client_with_key() -> (reqwest::blocking::Client, String, String) {
+    let base = BASE_URL.lock().unwrap().clone();
+    let key  = API_KEY.lock().unwrap().clone();
+    (reqwest::blocking::Client::new(), base, key)
+}
+
 // --- HTTP POST (fire and forget — API being down must never crash DCS) ---
 
 fn post_state(state: &GameState) {
-    let url = API_URL.lock().unwrap().clone();
-    let key = API_KEY.lock().unwrap().clone();
-    let client = reqwest::blocking::Client::new();
-    let mut req = client.post(&url).json(state);
+    let (client, base, key) = make_client_with_key();
+    let mut req = client.post(format!("{}/ingest", base)).json(state);
     if !key.is_empty() {
         req = req.header("X-API-Key", key);
     }
@@ -118,8 +124,8 @@ fn post_state(state: &GameState) {
 
 /// Called by dcsapi.lua on startup with values from dcsapi.cfg.
 fn init(_lua: &Lua, (host, port, api_key): (String, u32, String)) -> LuaResult<()> {
-    let mut url = API_URL.lock().map_err(|e| LuaError::RuntimeError(e.to_string()))?;
-    *url = format!("http://{}:{}/ingest", host, port);
+    let mut base = BASE_URL.lock().map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+    *base = format!("http://{}:{}", host, port);
     let mut key = API_KEY.lock().map_err(|e| LuaError::RuntimeError(e.to_string()))?;
     *key = api_key;
     Ok(())
@@ -260,6 +266,45 @@ fn set_positions_by_name(_lua: &Lua, obj_positions: LuaTable) -> LuaResult<()> {
     Ok(())
 }
 
+/// Called by dcsapi.lua each frame to fetch and return any pending server commands.
+/// Returns a Lua array of tables: { action, player_id, reason }.
+/// API failures return an empty table — a down API must never crash DCS.
+fn poll_commands(lua: &Lua, _: ()) -> LuaResult<LuaTable> {
+    let (client, base, key) = make_client_with_key();
+    let result = lua.create_table()?;
+
+    let mut req = client.get(format!("{}/commands", base));
+    if !key.is_empty() {
+        req = req.header("X-API-Key", key);
+    }
+
+    let resp = match req.send() {
+        Ok(r) => r,
+        Err(_) => return Ok(result),
+    };
+
+    let cmds: Vec<serde_json::Value> = match resp.json() {
+        Ok(v) => v,
+        Err(_) => return Ok(result),
+    };
+
+    for (i, cmd) in cmds.iter().enumerate() {
+        let t = lua.create_table()?;
+        if let Some(v) = cmd.get("action").and_then(|v| v.as_str()) {
+            t.set("action", v)?;
+        }
+        if let Some(v) = cmd.get("player_id").and_then(|v| v.as_i64()) {
+            t.set("player_id", v as i32)?;
+        }
+        if let Some(v) = cmd.get("reason").and_then(|v| v.as_str()) {
+            t.set("reason", v.to_string())?;
+        }
+        result.set(i + 1, t)?;
+    }
+
+    Ok(result)
+}
+
 // --- Lua module entry point ---
 
 #[mlua::lua_module]
@@ -274,5 +319,6 @@ fn dcsapi(lua: &Lua) -> LuaResult<LuaTable> {
     exports.set("update_bullseye",       lua.create_function(update_bullseye)?)?;
     exports.set("set_fps",               lua.create_function(set_fps)?)?;
     exports.set("set_positions_by_name", lua.create_function(set_positions_by_name)?)?;
+    exports.set("poll_commands",         lua.create_function(poll_commands)?)?;
     Ok(exports)
 }

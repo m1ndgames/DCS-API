@@ -376,6 +376,31 @@ function callbacks.onSimulationFrame()
         end
         dcsapi.update_bullseye(rl, rlo, bl, blo)
     end
+
+    -- Pending commands from the API
+    local ok_cmds, cmds = pcall(dcsapi.poll_commands)
+    if ok_cmds and cmds then
+        for _, cmd in ipairs(cmds) do
+            if cmd.action == "kick" then
+                pcall(net.kick, cmd.player_id, cmd.reason or "Kicked by admin")
+            elseif cmd.action == "ban" then
+                pcall(net.ban, cmd.player_id, cmd.reason or "Banned", cmd.duration or 0)
+            elseif cmd.action == "message" then
+                pcall(net.send_chat_to, cmd.message or "", cmd.player_id)
+            elseif cmd.action == "chat" then
+                pcall(net.send_chat, cmd.message or "", true)
+            elseif cmd.action == "broadcast" then
+                local msg = cmd.message or ""
+                local dur = cmd.duration or 10
+                pcall(net.dostring_in, "server",
+                    string.format("trigger.action.outText(%q, %d)", msg, dur))
+            elseif cmd.action == "load_next_mission" then
+                pcall(net.load_next_mission)
+            elseif cmd.action == "load_mission" then
+                pcall(net.load_mission, cmd.path or "")
+            end
+        end
+    end
 end
 
 DCS.setUserCallbacks(callbacks)
