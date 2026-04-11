@@ -190,3 +190,10 @@ cd Module
 cargo build --release
 # outputs: Module/target/release/dcsapi.dll
 ```
+
+## Support
+
+If you find this project useful, consider supporting it:
+
+- **Ko-fi:** [ko-fi.com/m1ndio](https://ko-fi.com/m1ndio)
+- **Discord:** [discord.gg/JsyZ79UfR8](https://discord.gg/PhVNgq866Q)
